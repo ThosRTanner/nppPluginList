@@ -789,10 +789,10 @@
 		{
 			"folder-name": "Linter++",
 			"display-name": "Linter++",
-			"version": "1.0.3.0",
+			"version": "1.0.4",
 			"npp-compatible-versions": "[8.7.5,]",
-			"id": "02AA08B8F919100B66CFB42126E84697F729B06894D9152AA639E2D5738DB047",
-			"repository": "https://github.com/ThosRTanner/notepad-pp-linter/releases/download/1.0.3/plugin_dll_Win32.zip",
+			"id": "08b7480f4e1ec42ccb7dbe4121b77a4d5a6bcbd71240ae188644f45def8f3a76",
+			"repository": "https://github.com/ThosRTanner/notepad-pp-linter/releases/download/1.0.4/plugin_dll_Win32.zip",
 			"description": "Allows realtime code check against any checkstyle-compatible linter: jshint, eslint, jscs, phpcs, csslint, and many others.",
 			"author": "Tom Tanner",
 			"homepage": "https://github.com/thosrtanner/notepad-pp-linter"
