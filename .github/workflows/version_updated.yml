@@ -1,0 +1,95 @@
+name: version_updated
+
+# act -P windows-latest=-self-hosted --artifact-server-path C:\Users\Dad/.act repository_dispatch
+
+# The payload should contain
+# release: str   # The release (github) or version (nppPluginList)
+# name: str      # The *folder* name for the plugin? fixme?
+# info: Json string
+#    "arch":      # x86, x64, arm64
+#        url: str   # URL to download from (repository in nppPluginList)
+#        sha: str   # The sha256 of the download file (id in nppPluginList)
+
+on:
+  repository_dispatch:
+    types: [version_updated]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update-version:
+    runs-on: windows-latest
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+
+    - name: update-file
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: python
+      run: |
+        import json
+        import subprocess
+        from pathlib import Path
+
+        def git_run(*args):
+            subprocess.check_call(("git", ) + args)
+
+        def gh_query(*args):
+            return subprocess.check_output(("gh", ) + args, text=True).rstrip()
+
+        version = "${{ github.event.client_payload.release }}"
+        print(f"{version=}")
+        folder_name = "${{ github.event.client_payload.name }}"
+        print(f"{folder_name=}")
+        info = ${{ github.event.client_payload.info }}
+        print(f"{info=}")
+        git_run("config", "user.email", "version_updated_bot@nowhere.com")
+        git_run("config", "user.name", "Version Updated Bot")
+
+        parent = gh_query(
+            "api", "-q", ".parent.full_name", f"repos/${{ github.repository }}"
+        )
+        git_run(
+          "remote",
+          "add",
+          "upstream",
+          f"${{ github.server_url }}/{parent}"
+        )
+        git_run("fetch", "-q", "upstream")
+        git_run("reset", "-q", "--hard", "upstream/master")
+
+        branch = f"update-plugin-list-{folder_name}-{version}"
+
+        git_run("checkout", "-b", branch)
+
+        # Update the plugin list files with the new version information
+        for arch, val in info.items():
+            print(f"{arch}= {val}")
+            pl_file = Path(f"./src/pl.{arch}.json")
+            with pl_file.open("r", encoding="utf8") as pl_handle:
+                pl_data = json.load(pl_handle)
+            for d in pl_data["npp-plugins"]:
+                if d["folder-name"] == folder_name:
+                  d["version"] = version
+                  d["id"] = val["sha"]
+                  d["repository"] = val["url"]
+                  break
+            with pl_file.open("w", encoding="utf8") as pl_handle:
+                json.dump(pl_data, pl_handle, indent="\t", ensure_ascii=False)
+                print(file=pl_handle)
+        git_run("status")
+
+        # replace these two with peter-evans/create-pull-request?
+        # It's likely we'll need a !"#$ token because the idiots at github
+        # decided you need a workflow permission and your default token doesn't
+        # have one, so you need a PAT. Which makes it almost impossible to
+        # make this usable...
+        # or point out you need to keep your fork reasonably up to date.
+        git_run("commit", "-a", "-m", f"Update {folder_name} to {version}")
+        git_run("branch", "-vvv")
+
+        git_run("push", "--force", "origin", branch)
+        # or use gh create pr
