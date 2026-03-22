@@ -1,0 +1,128 @@
+name: version_updated
+
+# The payload should contain
+# token: str      # Token with workflow, pull request and content permissions.
+# info: a jsonified object containing
+#   release: str      # The release (github) or version (nppPluginList)
+#   folder-name: str  # The *folder* name for the plugin (rename this?)
+#   any other tags supported in the pl.<arch>.json files.
+#   files:
+#     arch: # x86, x64, arm64 (repeat as necessary)
+#       repository: str   # URL to download from
+#       id: str           # The sha256 of the download file
+
+on:
+  repository_dispatch:
+    types: [version_updated]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update-version:
+    runs-on: windows-latest
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ github.event.client_payload.token }}
+
+    - name: update-file
+      id: update_file
+      env:
+        GH_TOKEN: ${{ github.event.client_payload.token }}
+        EVENT_INFO: ${{ github.event.client_payload.info }}
+      shell: python
+      run: |
+        import json
+        import os
+        import subprocess
+        from pathlib import Path
+
+        def git_run(*args):
+            subprocess.check_call(("git", ) + args)
+
+        def gh_api(*args):
+            return subprocess.check_output(
+              ("gh", "api", "-q") + args, text=True
+            ).rstrip()
+
+        plugin_tags = {
+            "folder-name",
+            "display-name",
+            "version",
+            "npp-compatible-versions",
+            "description",
+            "author",
+            "homepage",
+        }
+
+        info = json.loads(os.environ["EVENT_INFO"])
+
+        version = info["release"]
+        folder_name = info["folder-name"]
+
+        # Set up git (we seem to need to do this to push).
+        git_run("config", "user.email", "version_updater_bot@nowhere.com")
+        git_run("config", "user.name", "Version Updater Bot")
+
+        parent = gh_api(".parent.full_name", f"repos/${{ github.repository }}")
+        git_run(
+          "remote",
+          "add",
+          "upstream",
+          f"${{ github.server_url }}/{parent}"
+        )
+        git_run("fetch", "-q", "upstream")
+
+        default_branch = gh_api(".default_branch", f"repos/{parent}")
+
+        git_run("reset", "-q", "--hard", f"upstream/{default_branch}")
+
+        branch = f"update-plugin-list-{folder_name}-{version}"
+
+        git_run("checkout", "-b", branch)
+
+        # Update the plugin list files with the new version information
+        for arch, val in info["files"].items():
+            pl_file = Path(f"./src/pl.{arch}.json")
+            with pl_file.open("r", encoding="utf8") as pl_handle:
+                pl_data = json.load(pl_handle)
+            for d in pl_data["npp-plugins"]:
+                if d["folder-name"] == folder_name:
+                    d["id"] = val["id"]
+                    d["repository"] = val["repository"]
+                    for tag in plugin_tags:
+                        if tag in d and tag in info:
+                            d[tag] = info[tag]
+                    plugin = d["display-name"]
+                    break
+            with pl_file.open("w", encoding="utf8") as pl_handle:
+                json.dump(pl_data, pl_handle, indent="\t", ensure_ascii=False)
+                print(file=pl_handle)
+
+        git_run("commit", "-a", "-m", f"Update {plugin} to {version}")
+        git_run("push", "--force", "origin", branch)
+
+        subprocess.check_call(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--draft",
+                "--repo",
+                # Don't enable this (parent) till we're happy
+                "${{ github.repository }}", #parent,
+                "--base",
+                default_branch,
+                "--head",
+                f"${{ github.repository_owner }}:{branch}",
+                "--title",
+                f"Update {plugin} to version {version}",
+                "--body",
+                ""
+            ]
+        )
+        # Note that this sends the pr link to stdout, so we could use that to
+        # set automerge if supported.
